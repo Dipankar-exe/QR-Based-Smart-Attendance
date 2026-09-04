@@ -1,0 +1,253 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum SessionStatus {
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+}
+
+enum SecurityLogReason {
+  EXPIRED_QR
+  INVALID_QR
+  TOKEN_REVOKED
+  DUPLICATE_ATTENDANCE
+  WRONG_CLASS
+  INACTIVE_SESSION
+  SESSION_CLOSED
+  UNAUTHORIZED
+  PROXIMITY_FAILED
+  DEVICE_MISMATCH
+}
+
+model User {
+  id             String          @id @default(uuid())
+  name           String
+  email          String          @unique
+  passwordHash   String
+  role           Role            @default(STUDENT)
+  isActive       Boolean         @default(true)
+  avatarUrl      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  studentProfile StudentProfile?
+  teacherProfile TeacherProfile?
+  refreshTokens  RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id                String    @id @default(uuid())
+  userId            String
+  tokenHash         String    @unique
+  familyId          String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  createdAt         DateTime  @default(now())
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Department {
+  id        String           @id @default(uuid())
+  name      String           @unique
+  code      String           @unique
+  createdAt DateTime         @default(now())
+  students  StudentProfile[]
+  teachers  TeacherProfile[]
+  classes   AcademicClass[]
+  subjects  Subject[]
+
+  @@map("departments")
+}
+
+model StudentProfile {
+  id                 String                  @id @default(uuid())
+  userId             String                  @unique
+  registrationNumber String                  @unique
+  departmentId       String
+  classId            String
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department         Department              @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  academicClass      AcademicClass           @relation(fields: [classId], references: [id], onDelete: Restrict)
+  attendanceRecords  AttendanceRecord[]
+  securityLogs       AttendanceSecurityLog[]
+  manualAudits       AttendanceManualAudit[]
+
+  @@map("student_profiles")
+}
+
+model TeacherProfile {
+  id                 String                  @id @default(uuid())
+  userId             String                  @unique
+  employeeId         String                  @unique
+  departmentId       String
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department         Department              @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  assignments        TeacherClassSubject[]
+  attendanceSessions AttendanceSession[]
+  manualAudits       AttendanceManualAudit[]
+
+  @@map("teacher_profiles")
+}
+
+model AcademicClass {
+  id                 String                @id @default(uuid())
+  name               String
+  departmentId       String
+  semester           Int
+  section            String
+  batchYear          Int?
+  department         Department            @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  students           StudentProfile[]
+  teacherAssignments TeacherClassSubject[]
+  sessions           AttendanceSession[]
+
+  @@unique([departmentId, semester, section, batchYear])
+  @@map("academic_classes")
+}
+
+model Subject {
+  id                 String                @id @default(uuid())
+  name               String
+  code               String                @unique
+  departmentId       String
+  semester           Int
+  department         Department            @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  teacherAssignments TeacherClassSubject[]
+  sessions           AttendanceSession[]
+
+  @@map("subjects")
+}
+
+model TeacherClassSubject {
+  id            String         @id @default(uuid())
+  teacherId     String
+  classId       String
+  subjectId     String
+  createdAt     DateTime       @default(now())
+  teacher       TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  academicClass AcademicClass  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject       Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, classId, subjectId])
+  @@map("teacher_class_subjects")
+}
+
+model AttendanceSession {
+  id                String                  @id @default(uuid())
+  teacherId         String
+  classId           String
+  subjectId         String
+  startTime         DateTime                @default(now())
+  endTime           DateTime?
+  status            SessionStatus           @default(ACTIVE)
+  createdAt         DateTime                @default(now())
+  teacher           TeacherProfile          @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  academicClass     AcademicClass           @relation(fields: [classId], references: [id], onDelete: Restrict)
+  subject           Subject                 @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  qrTokens          QrToken[]
+  attendanceRecords AttendanceRecord[]
+  securityLogs      AttendanceSecurityLog[]
+  manualAudits      AttendanceManualAudit[]
+
+  @@index([teacherId, status])
+  @@index([classId, subjectId])
+  @@map("attendance_sessions")
+}
+
+model AttendanceRecord {
+  id                 String                 @id @default(uuid())
+  sessionId          String
+  studentId          String
+  status             AttendanceStatus       @default(PRESENT)
+  markedAt           DateTime               @default(now())
+  verificationMethod String?                @default("DYNAMIC_QR")
+  session            AttendanceSession      @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  student            StudentProfile         @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  manualAudit        AttendanceManualAudit?
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+  @@map("attendance_records")
+}
+
+model AttendanceManualAudit {
+  id           String            @id @default(uuid())
+  attendanceId String            @unique
+  sessionId    String
+  teacherId    String
+  studentId    String
+  reason       String            @db.VarChar(200)
+  createdAt    DateTime          @default(now())
+  attendance   AttendanceRecord  @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  session      AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  teacher      TeacherProfile    @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  student      StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([createdAt])
+  @@map("attendance_manual_audits")
+}
+
+model QrToken {
+  id        String            @id @default(uuid())
+  sessionId String
+  windowId  Int               @default(0)
+  tokenHash String            @unique
+  createdAt DateTime          @default(now())
+  expiresAt DateTime
+  isRevoked Boolean           @default(false)
+  session   AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, windowId])
+  @@index([expiresAt])
+  @@map("qr_tokens")
+}
+
+model AttendanceSecurityLog {
+  id                 String             @id @default(uuid())
+  studentId          String?
+  sessionId          String?
+  reason             SecurityLogReason
+  ipAddress          String?
+  userAgent          String?
+  verificationMethod String?
+  details            String?            @db.Text
+  createdAt          DateTime           @default(now())
+  student            StudentProfile?    @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  session            AttendanceSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([reason])
+  @@index([createdAt])
+  @@index([studentId])
+  @@map("attendance_security_logs")
+}

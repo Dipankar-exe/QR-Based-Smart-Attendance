@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+!.env.example
+*.log
+uploads/
+scratch_*.ts
+scratch_*.js
+debug_*.js
